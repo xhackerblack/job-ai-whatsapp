@@ -67,10 +67,14 @@ function formatJob(j) {
   return `🎯 *عرض عمل جديد — ${j.source}*\n` +
     `━━━━━━━━━━━━━━━\n` +
     `📌 *${j.title}*\n` +
-    (j.type ? `🏷️ النوع: ${j.type}\n` : '') +
-    (j.date ? `📅 التاريخ: ${j.date}\n` : '') +
-    (j.desc ? `\n📝 ${j.desc.slice(0, 180)}...\n` : '') +
-    `\n🔗 *رابط الترشيح:*\n${j.link}\n` +
+    (j.employer ? `🏢 المؤسسة: ${j.employer}\n` : '') +
+    (j.contract ? `📋 نوع العقد: ${j.contract}\n` : '') +
+    (j.city ? `📍 المدينة: ${j.city}\n` : '') +
+    (j.type && !j.contract ? `🏷️ التصنيف: ${j.type}\n` : '') +
+    (j.date ? `📅 تاريخ النشر: ${j.date}\n` : '') +
+    (j.deadline ? `⏳ *آخر أجل للترشيح: ${j.deadline}*\n` : '') +
+    (j.desc ? `\n📝 ${j.desc.slice(0, 250)}...\n` : '') +
+    `\n🔗 *رابط الترشيح والتفاصيل:*\n${j.link}\n` +
     `━━━━━━━━━━━━━━━\n` +
     `🤖 _Job AI — خدمة البحث عن العمل_`;
 }
