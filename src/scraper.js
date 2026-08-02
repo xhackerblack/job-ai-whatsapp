@@ -58,6 +58,35 @@ function extractEmployer(title) {
   return m ? m[1].trim() : '';
 }
 
+// ---------------- تحويل نص "آخر أجل" إلى تاريخ حقيقي للتنبيهات ----------------
+const AR_MONTH_MAP = {
+  'يناير':0,'فبراير':1,'مارس':2,'أبريل':3,'ابريل':3,'ماي':4,'مايو':4,'يونيو':5,'يونيه':5,
+  'يوليوز':6,'يوليو':6,'غشت':7,'أغسطس':7,'شتنبر':8,'سبتمبر':8,'أكتوبر':9,'اكتوبر':9,
+  'نونبر':10,'نوفمبر':10,'دجنبر':11,'ديسمبر':11
+};
+const FR_MONTH_MAP = {
+  'janvier':0,'février':1,'fevrier':1,'mars':2,'avril':3,'mai':4,'juin':5,'juillet':6,
+  'août':7,'aout':7,'septembre':8,'octobre':9,'novembre':10,'décembre':11,'decembre':11
+};
+
+function parseDeadlineDate(dl) {
+  if (!dl) return null;
+  dl = dl.trim();
+  // عربي: "17 غشت 2026"
+  let m = dl.match(new RegExp(`([0-9]{1,2})\\s+(${AR_MONTHS})\\s+([0-9]{4})`));
+  if (m) return new Date(+m[3], AR_MONTH_MAP[m[2]], +m[1], 23, 59).toISOString();
+  // فرنسي: "17 août 2026"
+  m = dl.match(new RegExp(`([0-9]{1,2})\\s+(${FR_MONTHS})\\s+([0-9]{4})`, 'i'));
+  if (m) return new Date(+m[3], FR_MONTH_MAP[m[2].toLowerCase()], +m[1], 23, 59).toISOString();
+  // رقمي: 17/08/2026
+  m = dl.match(/([0-9]{1,2})[\/\-.]([0-9]{1,2})[\/\-.]([0-9]{2,4})/);
+  if (m) {
+    const y = m[3].length === 2 ? 2000 + +m[3] : +m[3];
+    return new Date(y, +m[2] - 1, +m[1], 23, 59).toISOString();
+  }
+  return null;
+}
+
 // ============================================================
 //  Alwadifa-Maroc.com — الصفحة الرئيسية + صفحة التفاصيل
 // ============================================================
@@ -88,6 +117,7 @@ async function scrapeAlwadifa(pages = 2, enrichDetails = true) {
             type,
             link,
             deadline: extractDeadline(title + ' ' + desc),  // آخر أجل غالباً في العنوان
+            deadlineDate: parseDeadlineDate(extractDeadline(title + ' ' + desc)),
             employer: extractEmployer(title),
             city: '',
             contract: ''
@@ -110,7 +140,7 @@ async function scrapeAlwadifa(pages = 2, enrichDetails = true) {
         if (body.length > 100) {
           job.desc = body.slice(0, 900); // وصف موسّع
           const dl = extractDeadline(body);
-          if (dl) job.deadline = dl; // الأولوية لآخر أجل من صفحة التفاصيل
+          if (dl) { job.deadline = dl; job.deadlineDate = parseDeadlineDate(dl); } // الأولوية لآخر أجل من صفحة التفاصيل
         }
         await new Promise(r => setTimeout(r, 1000)); // تأدب مع السيرفر
       } catch (e) {
@@ -211,6 +241,7 @@ function parseAnapecHTML(html) {
       type: contractM ? contractM[1].toUpperCase() : 'عرض عمل',
       link: href || 'https://www.anapec.org/sigec-app-rv/fr/chercheurs/resultat_recherche/tout:all',
       deadline,
+      deadlineDate: parseDeadlineDate(deadline),
       employer: extractEmployer(title),
       city: cityM ? cityM[1] : '',
       contract: contractM ? contractM[1].toUpperCase() : ''
@@ -234,4 +265,4 @@ async function scanAll(config) {
   return all;
 }
 
-module.exports = { scanAll, scrapeAlwadifa, scrapeAnapec, extractDeadline };
+module.exports = { scanAll, scrapeAlwadifa, scrapeAnapec, extractDeadline, parseDeadlineDate };
