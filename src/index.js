@@ -1,5 +1,6 @@
 // ============================================================
-//  index.js v3 — التشغيل: البوت + الفاحص + مراقب آخر الأجل + اللوحة
+//  index.js v3.1 — Runner: bot + scanner + deadline watcher + dashboard
+//  All console logs in English (Termux has no Arabic font support)
 // ============================================================
 const store = require('./store');
 const { scanAll } = require('./scraper');
@@ -11,47 +12,60 @@ let scanning = false;
 let timer = null;
 let alertTimer = null;
 
-// إرسال العروض غير المرسلة إلى المجموعة
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Send unsent jobs to the group
 async function sendPending() {
   const cfg = store.getConfig();
-  if (cfg.paused) { console.log('⏸️ البوت متوقف مؤقتاً'); return; }
-  if (!cfg.groupJid) { console.log('⚠️ لم تختر مجموعة واتساب بعد — اخترها من لوحة التحكم'); return; }
+  if (cfg.paused) { console.log('[BOT] Paused — nothing sent'); return; }
+  if (!cfg.groupJid) { console.log('[BOT] No WhatsApp group selected — pick one in the dashboard'); return; }
   const pending = store.getJobs().filter(j => !j.sent && !j.failed).slice(0, cfg.maxJobsPerScan);
+  console.log(`[BOT] Sending ${pending.length} pending job(s)...`);
   for (const job of pending) {
     const ok = await wa.sendJob(job, cfg.groupJid);
     if (ok) {
       store.markSent([job.id]);
-      console.log('📤 أُرسل:', job.title.slice(0, 50));
+      console.log('[BOT] Sent:', job.title.slice(0, 50));
     } else {
       store.markFailed([job.id]);
-      console.log('⚠️ تأجل الإرسال (سيُعاد لاحقاً):', job.title.slice(0, 40));
+      console.log('[BOT] Send deferred (will retry later):', job.title.slice(0, 40));
       break;
     }
   }
 }
 
-// فحص المواقع وجلب الجديد
+// Scan both sites and store new offers
 async function runScan(manual = false) {
   const cfg0 = store.getConfig();
   if (cfg0.paused && !manual) return;
-  if (scanning) { console.log('⏳ فحص آخر جارٍ...'); return; }
+  if (scanning) { console.log('[SCAN] Another scan is already running...'); return; }
   scanning = true;
-  console.log(manual ? '🔍 فحص يدوي...' : '🔍 فحص تلقائي مجدول...');
+  console.log(manual ? '[SCAN] Manual scan started...' : '[SCAN] Scheduled scan started...');
   try {
     const cfg = store.getConfig();
     const found = await scanAll(cfg);
     const fresh = store.addJobs(found);
     store.saveConfig({ lastScan: new Date().toISOString() });
-    console.log(`✅ وُجد ${found.length} عرض — الجديد: ${fresh.length}`);
+    console.log(`[SCAN] Done — found ${found.length} offers, new: ${fresh.length}`);
     if (fresh.length && cfg.autoSend && !cfg.paused) await sendPending();
   } catch (e) {
-    console.error('خطأ في الفحص:', e.message);
+    console.error('[SCAN] Error:', e.message);
   } finally {
     scanning = false;
   }
 }
 
-// ---------------- مراقب آخر الأجل: تنبيهات ملوّنة ----------------
+// Clear ALL offers, rescan both sites, then send a fresh batch to the group
+async function refreshAll() {
+  console.log('[REFRESH] Clearing all offers and rescanning...');
+  store.clearAllJobs();
+  scanning = false;
+  await runScan(true);
+  await sendPending();
+  console.log('[REFRESH] Done');
+}
+
+// ---------------- Deadline watcher: colored alerts ----------------
 async function checkDeadlines() {
   const cfg = store.getConfig();
   if (!cfg.deadlineAlerts || cfg.paused || !cfg.groupJid) return;
@@ -60,48 +74,50 @@ async function checkDeadlines() {
     if (!job.deadlineDate) continue;
     const daysLeft = Math.ceil((new Date(job.deadlineDate).getTime() - now) / 864e5);
 
-    // 🔴 عاجل: يومان أو أقل
     if (daysLeft >= 0 && daysLeft <= cfg.alertDaysRed && !job.alerted_red) {
-      console.log(`🔴 تنبيه عاجل (${daysLeft} يوم):`, job.title.slice(0, 45));
+      console.log(`[ALERT] URGENT (${daysLeft}d):`, job.title.slice(0, 45));
       if (await wa.sendDeadlineAlert(job, cfg.groupJid, daysLeft)) store.markAlerted(job.id, 'red');
-      await new Promise(r => setTimeout(r, 2500));
+      await sleep(2500);
     }
-    // 🟠 يقترب: أسبوع أو أقل
     else if (daysLeft > cfg.alertDaysRed && daysLeft <= cfg.alertDaysYellow && !job.alerted_yellow) {
-      console.log(`🟠 تنبيه اقتراب (${daysLeft} أيام):`, job.title.slice(0, 45));
+      console.log(`[ALERT] Soon (${daysLeft}d):`, job.title.slice(0, 45));
       if (await wa.sendDeadlineAlert(job, cfg.groupJid, daysLeft)) store.markAlerted(job.id, 'yellow');
-      await new Promise(r => setTimeout(r, 2500));
+      await sleep(2500);
     }
-    // ⚫ منتهي: إشعار أخير مرة واحدة
     else if (daysLeft < 0 && job.sent && !job.alerted_expired) {
       if (await wa.sendDeadlineAlert(job, cfg.groupJid, daysLeft)) store.markAlerted(job.id, 'expired');
-      await new Promise(r => setTimeout(r, 2500));
+      await sleep(2500);
     }
   }
 }
 
-// جدولة الفحص التلقائي
+// Human-like scheduling: base interval +/- up to 30% random jitter,
+// so requests never hit the sites at perfectly regular intervals
 function schedule() {
-  if (timer) clearInterval(timer);
+  if (timer) clearTimeout(timer);
   const mins = store.getConfig().scanIntervalMin || 30;
-  timer = setInterval(() => runScan(false), mins * 60 * 1000);
-  console.log(`⏰ الفحص التلقائي كل ${mins} دقيقة`);
-  // مراقب آخر الأجل: كل 3 ساعات
+  const jitter = 0.7 + Math.random() * 0.6; // 70%..130% of the interval
+  const next = Math.round(mins * 60 * 1000 * jitter);
+  console.log(`[SCHEDULE] Next scan in ~${Math.round(next / 60000)} min (base ${mins} min + human jitter)`);
+  timer = setTimeout(() => { runScan(false); schedule(); }, next);
+
   if (alertTimer) clearInterval(alertTimer);
   alertTimer = setInterval(checkDeadlines, 3 * 3600 * 1000);
 }
 
-// واجهات يستخدمها نظام الأوامر المخفية
+// Interfaces used by the hidden WhatsApp commands and the dashboard
 global.__runScan = runScan;
 global.__sendPending = sendPending;
+global.__refreshAll = refreshAll;
 
-// التشغيل
+// Startup
 (async () => {
-  console.log('╔══════════════════════════════════════╗');
-  console.log('║  🤖 Job AI v3 — بوت عروض العمل واتساب ║');
-  console.log('╚══════════════════════════════════════╝');
+  console.log('========================================');
+  console.log('  Job AI v3.1 — WhatsApp Job Offers Bot');
+  console.log('  Sources: ANAPEC + Alwadifa-Maroc');
+  console.log('========================================');
 
-  startServer(PORT, { runScan, sendPending, checkDeadlines });
+  startServer(PORT, { runScan, sendPending, checkDeadlines, refreshAll });
   schedule();
   await wa.startBot(() => {
     store.resetFailed();
