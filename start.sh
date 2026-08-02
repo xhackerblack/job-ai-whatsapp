@@ -1,14 +1,14 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # ============================================================
-#  start.sh — تشغيل البوت
+#  start.sh — Launch the bot (English output for Termux)
 # ============================================================
 clear
-echo "╔════════════════════════════════════════════╗"
-echo "║   🤖 Job AI — بوت عروض العمل واتساب        ║"
-echo "║   المصادر: أنابيك + الوظيفة ماروك          ║"
-echo "╚════════════════════════════════════════════╝"
+echo "=============================================="
+echo "   Job AI v3.1 - WhatsApp Job Offers Bot"
+echo "   Sources: ANAPEC + Alwadifa-Maroc"
+echo "=============================================="
 echo ""
-echo "🖥️  لوحة التحكم:  http://localhost:3000"
-echo "⏹️  للإيقاف:  Ctrl + C"
+echo "Dashboard : http://localhost:3000"
+echo "Stop      : Ctrl + C"
 echo ""
 node src/index.js
