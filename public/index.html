@@ -114,6 +114,7 @@
         <button onclick="api('/api/scan','POST');toast('🔍 بدأ الفحص...')">🔍 فحص المواقع الآن</button>
         <button class="secondary" onclick="api('/api/send-pending','POST');toast('📤 جارٍ الإرسال...')">📤 إرسال المعلّقة</button>
         <button class="secondary" onclick="api('/api/check-deadlines','POST');toast('⏰ فحص آجال الترشيح...')">⏰ فحص الآجال</button>
+        <button onclick="refreshAllJobs()">🔄 تحديث شامل</button>
         <button class="secondary" onclick="testSend()">🧪 رسالة تجريبية</button>
       </div>
     </div>
@@ -156,7 +157,8 @@
         <code>/ترتيب</code> ترتيب الأعضاء الكامل<br>
         <code>/مجموعات</code> قائمة مجموعاتك<br>
         <code>/معلقة</code> العروض المعلّقة<br>
-        <code>/مسح_فاشلة</code> إعادة الفاشلة — <code>/اعادة_الكل</code> إعادة كل العروض
+        <code>/مسح_فاشلة</code> إعادة الفاشلة — <code>/اعادة_الكل</code> إعادة كل العروض<br>
+        <code>/تحديث_الكل</code> مسح كل العروض + فحص + إرسال دفعة جديدة
       </div>
     </div>
     <div class="card">
@@ -261,6 +263,7 @@ async function loadJobs(){
     <h3>${esc(j.title)}</h3>
     <div class="meta">
       <span>🌐 ${j.source}</span>
+      ${j.sector==='public'?'<span style="color:#60a5fa;">🟦 قطاع عام</span>':(j.sector==='private'?'<span style="color:#c084fc;">🟪 قطاع خاص</span>':'')}
       ${j.employer?`<span>🏢 ${esc(j.employer)}</span>`:''}
       ${j.city?`<span>📍 ${j.city}</span>`:''}
       ${j.contract?`<span>📋 ${j.contract}</span>`:''}
@@ -296,6 +299,7 @@ async function loadMembers(){
 async function botPause(){ await api('/api/bot/pause','POST'); toast('⏸️ البوت متوقف مؤقتاً'); refreshAll(); }
 async function botResume(){ await api('/api/bot/resume','POST'); toast('▶️ البوت يعمل'); refreshAll(); }
 async function testSend(){ const r=await api('/api/test-send','POST'); toast(r.ok?'🧪 أُرسلت الرسالة التجريبية مع الصورة المتحركة!':'❌ فشل — تأكد من المجموعة والاتصال'); }
+async function refreshAllJobs(){ if(confirm('🔄 سيتم مسح جميع العروض، ثم فحص الموقعين، ثم إرسال دفعة جديدة. متابعة؟')){ await api('/api/refresh-all','POST'); toast('🔄 التحديث الشامل بدأ...'); } }
 
 function esc(s){ return (s||'').replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
 function setToggle(id,on){ document.getElementById(id).classList.toggle('on',!!on); }
