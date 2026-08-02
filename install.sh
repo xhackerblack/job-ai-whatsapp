@@ -18,10 +18,17 @@ echo "📦 [3/3] تجهيز مجلد البيانات..."
 mkdir -p data
 
 # اختياري: تثبيت Chromium لاستخراج أنابيك (الموقع يعمل بـ Angular)
-read -p "❓ هل تريد تثبيت Chromium لدعم موقع أنابيك؟ (y/n): " ans
+read -p "❓ هل تريد تثبيت Chromium لدعم موقع أنابيك؟ (~400MB) (y/n): " ans
 if [ "$ans" = "y" ]; then
-  pkg install -y tur-repo 2>/dev/null || true
-  pkg install -y chromium 2>/dev/null && echo "✅ تم تثبيت Chromium" || echo "⚠️ تعذر تثبيت Chromium — يمكنك تثبيته لاحقاً: pkg install tur-repo && pkg install chromium"
+  echo "📦 تثبيت المستودعات المطلوبة (tur-repo + x11-repo)..."
+  pkg install -y tur-repo x11-repo 2>/dev/null || true
+  pkg update -y
+  if pkg install -y chromium; then
+    echo "✅ تم تثبيت Chromium بنجاح"
+  else
+    echo "⚠️ تعذر تثبيت Chromium — البوت سيعمل بدونه على موقع الوظيفة ماروك"
+    echo "   لإعادة المحاولة لاحقاً: pkg install x11-repo && pkg install chromium"
+  fi
 fi
 
 echo ""
