@@ -1,5 +1,5 @@
 // ============================================================
-//  scraper.js v3 — Deep job extraction with human-like behavior
+//  scraper.js v3.2 — Deep job extraction with human-like behavior
 //  Logs are in English (Termux has no Arabic font support)
 // ============================================================
 const axios = require('axios');
@@ -212,25 +212,44 @@ async function scrapeAnapec(headless = false) {
     console.log('[ANAPEC] Chromium not found — run: pkg install x11-repo -y && pkg install chromium -y');
     return [];
   }
-  try {
-    const { execSync } = require('child_process');
-    const tmp = path.join(TMP_DIR, 'anapec_render.html');
-    const sh = process.env.PREFIX ? process.env.PREFIX + '/bin/sh' : '/bin/sh';
-    // Hard 90s shell timeout so a hung browser can never block the bot
-    execSync(
-      `timeout 90 "${chrome}" --headless=new --disable-gpu --no-sandbox --disable-dev-shm-usage --disable-extensions --virtual-time-budget=15000 --dump-dom "${url}" > "${tmp}" 2>/dev/null`,
-      { timeout: 100000, shell: sh }
-    );
-    html = fs.existsSync(tmp) ? fs.readFileSync(tmp, 'utf8') : '';
-    console.log('[ANAPEC] Chromium render done, HTML size:', html.length);
-  } catch (e) {
-    console.error('[ANAPEC] headless error:', e.message);
-    return [];
+
+  // Try several Chromium modes — Termux/Android often needs specific flags
+  const { execSync } = require('child_process');
+  const sh = process.env.PREFIX ? process.env.PREFIX + '/bin/sh' : '/bin/sh';
+  const tmp = path.join(TMP_DIR, 'anapec_render.html');
+  const errLog = path.join(TMP_DIR, 'chromium_err.log');
+  const attempts = [
+    // 1) New headless
+    `--headless=new --disable-gpu --no-sandbox --disable-dev-shm-usage --disable-extensions --no-first-run --virtual-time-budget=25000 --dump-dom`,
+    // 2) Old headless + single process (most reliable on Android/Termux)
+    `--headless --disable-gpu --no-sandbox --no-zygote --single-process --disable-dev-shm-usage --no-first-run --virtual-time-budget=25000 --dump-dom`,
+    // 3) Minimal fallback
+    `--headless --no-sandbox --disable-dev-shm-usage --dump-dom`
+  ];
+  for (let i = 0; i < attempts.length; i++) {
+    try {
+      execSync(
+        `timeout 110 "${chrome}" ${attempts[i]} "${url}" > "${tmp}" 2>"${errLog}"`,
+        { timeout: 120000, shell: sh }
+      );
+      html = fs.existsSync(tmp) ? fs.readFileSync(tmp, 'utf8') : '';
+      const jobs = html ? parseAnapecHTML(html) : [];
+      console.log(`[ANAPEC] Chromium mode ${i + 1}: HTML size ${html.length}, jobs: ${jobs.length}`);
+      if (jobs.length > 0) return jobs;
+    } catch (e) {
+      console.error(`[ANAPEC] Chromium mode ${i + 1} failed:`, e.message.slice(0, 120));
+    }
+    await sleep(3000);
   }
 
-  const jobs = html ? parseAnapecHTML(html) : [];
-  console.log('[ANAPEC]:', jobs.length, 'jobs');
-  return jobs;
+  // All modes failed — show the real Chromium error so we can diagnose
+  try {
+    const err = fs.readFileSync(errLog, 'utf8').trim().split('\n').slice(-4).join(' | ');
+    if (err) console.log('[ANAPEC] Chromium error log:', err.slice(0, 300));
+    else console.log('[ANAPEC] Chromium gave empty output — site may be slow or blocking. Try again later.');
+  } catch (e) { /* no log */ }
+  console.log('[ANAPEC] 0 jobs — Alwadifa keeps working; ANAPEC will retry on the next scan');
+  return [];
 }
 
 function parseAnapecHTML(html) {
