@@ -1,5 +1,6 @@
 // ============================================================
-//  whatsapp.js v3 — بوت Baileys + صورة متحركة + أوامر مخفية + إحصائيات
+//  whatsapp.js v3.1 — Baileys bot + GIF + hidden commands + sector colors
+//  Console logs in English (Termux has no Arabic font support)
 // ============================================================
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
@@ -15,7 +16,7 @@ let qrData = null;
 let status = 'offline'; // offline | qr | online
 let groupsCache = [];
 
-const GIF_MP4 = ensureGif(); // استخراج الصورة المتحركة عند أول تشغيل
+const GIF_MP4 = ensureGif(); // extract the animated GIF on first run
 
 async function startBot(onReady) {
   const { state, saveCreds } = await useMultiFileAuthState(path.join(__dirname, '..', 'data', 'auth'));
@@ -36,13 +37,13 @@ async function startBot(onReady) {
     if (qr) {
       qrData = qr;
       status = 'qr';
-      console.log('\n📱 امسح رمز QR التالي بواتسابك (الأجهزة المرتبطة ← ربط جهاز):\n');
+      console.log('\n[WA] Scan this QR code with WhatsApp (Linked Devices -> Link a Device):\n');
       qrcode.generate(qr, { small: true });
     }
     if (connection === 'open') {
       status = 'online';
       qrData = null;
-      console.log('✅ واتساب متصل بنجاح!');
+      console.log('[WA] WhatsApp connected successfully!');
       await refreshGroups();
       if (onReady) onReady();
     }
@@ -50,15 +51,15 @@ async function startBot(onReady) {
       status = 'offline';
       const code = lastDisconnect?.error?.output?.statusCode;
       if (code !== DisconnectReason.loggedOut) {
-        console.log('🔄 إعادة الاتصال...');
+        console.log('[WA] Reconnecting...');
         setTimeout(() => startBot(onReady), 5000);
       } else {
-        console.log('⚠️ تم تسجيل الخروج — احذف مجلد data/auth وأعد التشغيل');
+        console.log('[WA] Logged out — delete the data/auth folder and restart');
       }
     }
   });
 
-  // ---------------- استقبال الرسائل: أوامر مخفية + تتبع الإحصائيات ----------------
+  // ---------------- Incoming messages: hidden commands + stats tracking ----------------
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
     for (const msg of messages) {
@@ -72,14 +73,14 @@ async function startBot(onReady) {
           || '';
         const name = msg.pushName || '';
 
-        // تتبع إحصائيات أعضاء المجموعة (رسائل حقيقية فقط)
+        // Track group member stats (real messages only)
         if (isGroup && !fromMe && participant) {
           store.trackMessage(remoteJid, participant, name);
         }
 
         if (!text.trim()) continue;
 
-        // معالجة الأوامر (المخفية للأدمن + العامة للأعضاء)
+        // Command handling (hidden admin + public member commands)
         const reply = await handleCommand({
           text: text.trim(),
           fromMe,
@@ -91,12 +92,12 @@ async function startBot(onReady) {
         });
 
         if (reply) {
-          // الأوامر المخفية تُرسل خاصة للأدمن، العامة تُرسل في نفس المحادثة
+          // Hidden commands go privately to the admin; public ones stay in the chat
           const target = reply.private ? (reply.adminJid || remoteJid) : remoteJid;
           await sock.sendMessage(target, { text: reply.text }, reply.private ? {} : { quoted: msg });
         }
       } catch (e) {
-        console.error('خطأ معالجة رسالة:', e.message);
+        console.error('[WA] message handling error:', e.message);
       }
     }
   });
@@ -107,15 +108,23 @@ async function refreshGroups() {
   try {
     const g = await sock.groupFetchAllParticipating();
     groupsCache = Object.values(g).map(x => ({ jid: x.id, name: x.subject, members: x.participants.length }));
-  } catch (e) { console.error('خطأ جلب المجموعات:', e.message); }
+  } catch (e) { console.error('[WA] fetch groups error:', e.message); }
   return groupsCache;
 }
 
-// ---------------- تنسيق رسالة العرض ----------------
+// Sector badge: 🟦 public sector / 🟪 private sector
+function sectorBadge(j) {
+  if (j.sector === 'public') return '🟦 القطاع: *العام (مباراة/مؤسسة عمومية)*\n';
+  if (j.sector === 'private') return '🟪 القطاع: *الخاص*\n';
+  return '';
+}
+
+// ---------------- Job message formatting ----------------
 function formatJob(j) {
   return `🎯 *عرض عمل جديد — ${j.source}*\n` +
     `━━━━━━━━━━━━━━━\n` +
     `📌 *${j.title}*\n` +
+    sectorBadge(j) +
     (j.employer ? `🏢 المؤسسة: ${j.employer}\n` : '') +
     (j.contract ? `📋 نوع العقد: ${j.contract}\n` : '') +
     (j.city ? `📍 المدينة: ${j.city}\n` : '') +
@@ -128,31 +137,35 @@ function formatJob(j) {
     `🤖 _Job AI — خدمة البحث عن العمل_`;
 }
 
-// ---------------- إرسال عرض (صورة متحركة + نص) ----------------
+// Human-like random delay: like a person typing/sending messages
+const humanDelay = (min = 3000, max = 8000) =>
+  new Promise(r => setTimeout(r, min + Math.floor(Math.random() * (max - min))));
+
+// ---------------- Send a job offer (animated GIF + text) ----------------
 async function sendJob(job, groupJid) {
   if (!sock || status !== 'online' || !groupJid) return false;
   try {
     const cfg = store.getConfig();
-    // 1) الصورة المتحركة كـ GIF حي داخل واتساب
+    // 1) Animated GIF inside WhatsApp
     if (cfg.sendGif && fs.existsSync(GIF_MP4)) {
       await sock.sendMessage(groupJid, {
         video: fs.readFileSync(GIF_MP4),
         gifPlayback: true,
         caption: `🆕 *وصل عرض عمل جديد!*`
       });
-      await new Promise(r => setTimeout(r, 1500));
+      await humanDelay(2000, 5000);
     }
-    // 2) نص العرض الكامل
+    // 2) Full job text
     await sock.sendMessage(groupJid, { text: formatJob(job) });
-    await new Promise(r => setTimeout(r, 2000));
+    await humanDelay(3000, 8000); // human-like pause before the next job
     return true;
   } catch (e) {
-    console.error('خطأ إرسال:', e.message);
+    console.error('[WA] send error:', e.message);
     return false;
   }
 }
 
-// ---------------- تنبيه اقتراب آخر الأجل (بألوان) ----------------
+// ---------------- Deadline alerts (colored) ----------------
 function urgencyBanner(daysLeft) {
   if (daysLeft < 0)  return { icon: '⚫', label: 'انتهى الأجل', color: '⚫⚫⚫' };
   if (daysLeft <= 2) return { icon: '🔴', label: 'عاجل — ينتهي قريباً جداً', color: '🔴🔴🔴' };
@@ -178,12 +191,12 @@ async function sendDeadlineAlert(job, groupJid, daysLeft) {
   try {
     if (fs.existsSync(GIF_MP4) && !expired) {
       await sock.sendMessage(groupJid, { video: fs.readFileSync(GIF_MP4), gifPlayback: true, caption: `${u.icon} تنبيه مهم!` });
-      await new Promise(r => setTimeout(r, 1500));
+      await humanDelay(2000, 4000);
     }
     await sock.sendMessage(groupJid, { text });
     return true;
   } catch (e) {
-    console.error('خطأ تنبيه:', e.message);
+    console.error('[WA] alert error:', e.message);
     return false;
   }
 }
@@ -194,7 +207,7 @@ async function sendText(jid, text) {
   catch { return false; }
 }
 
-// واجهة يستخدمها نظام الأوامر وباقي الوحدات
+// Interface used by the command system and other modules
 const botAPI = {
   sendText,
   sendJob,

@@ -1,5 +1,5 @@
 // ============================================================
-//  server.js v3 — خادم لوحة التحكم (تحكم كامل بالبوت والعروض)
+//  server.js v3.1 — Dashboard server (full bot & jobs control)
 // ============================================================
 const express = require('express');
 const path = require('path');
@@ -45,6 +45,13 @@ app.post('/api/jobs/clear', (req, res) => {
   res.json({ ok: true });
 });
 
+// مسح كل العروض + فحص + إرسال دفعة (تحديث شامل)
+app.post('/api/refresh-all', (req, res) => {
+  const refreshAll = req.app.get('refreshAll');
+  if (refreshAll) setTimeout(refreshAll, 300);
+  res.json({ ok: true });
+});
+
 // إحصائيات أعضاء المجموعة
 app.get('/api/members', (req, res) => {
   const cfg = store.getConfig();
@@ -67,7 +74,7 @@ app.post('/api/bot/resume', (req, res) => res.json(store.saveConfig({ paused: fa
 
 // فحص يدوي
 app.post('/api/scan', async (req, res) => {
-  res.json({ ok: true, message: 'بدأ الفحص...' });
+  res.json({ ok: true, message: 'scan started' });
   const runScan = req.app.get('runScan');
   if (runScan) runScan(true);
 });
@@ -89,7 +96,7 @@ app.post('/api/check-deadlines', (req, res) => {
 // رسالة تجريبية للمجموعة (للتأكد أن كل شيء يعمل)
 app.post('/api/test-send', async (req, res) => {
   const cfg = store.getConfig();
-  if (!cfg.groupJid) return res.json({ ok: false, error: 'لم تختر مجموعة' });
+  if (!cfg.groupJid) return res.json({ ok: false, error: 'no group selected' });
   const jobs = store.getJobs();
   const sample = jobs[0] || { title: 'عرض تجريبي', source: 'Job AI', desc: 'هذه رسالة تجريبية للتأكد من عمل البوت', link: 'https://github.com/xhackerblack/job-ai-whatsapp', date: new Date().toISOString().slice(0, 10), deadline: '' };
   const ok = await wa.sendJob(sample, cfg.groupJid);
@@ -100,14 +107,15 @@ app.post('/api/test-send', async (req, res) => {
 app.post('/api/logout', (req, res) => {
   const authDir = path.join(__dirname, '..', 'data', 'auth');
   if (fs.existsSync(authDir)) fs.rmSync(authDir, { recursive: true, force: true });
-  res.json({ ok: true, message: 'تم المسح — أعد تشغيل البوت' });
+  res.json({ ok: true, message: 'session cleared — restart the bot' });
 });
 
 function startServer(port, deps) {
   app.set('runScan', deps.runScan);
   app.set('sendPending', deps.sendPending);
   app.set('checkDeadlines', deps.checkDeadlines);
-  app.listen(port, () => console.log(`\n🖥️  لوحة التحكم: http://localhost:${port}\n`));
+  app.set('refreshAll', deps.refreshAll);
+  app.listen(port, () => console.log(`\n[DASHBOARD] Control panel: http://localhost:${port}\n`));
 }
 
 module.exports = { startServer };
