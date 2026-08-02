@@ -42,7 +42,16 @@ module.exports = {
     return fresh;
   },
   markSent(ids) {
-    jobs = jobs.map(j => ids.includes(j.id) ? { ...j, sent: true } : j);
+    jobs = jobs.map(j => ids.includes(j.id) ? { ...j, sent: true, failed: false } : j);
+    saveJSON(JOBS_FILE, jobs);
+  },
+  markFailed(ids) {
+    jobs = jobs.map(j => ids.includes(j.id) ? { ...j, failed: true } : j);
+    saveJSON(JOBS_FILE, jobs);
+  },
+  resetFailed() {
+    // إعادة المحاولة للعروض التي فشل إرسالها (تُستدعى عند استقرار الاتصال)
+    jobs = jobs.map(j => j.failed ? { ...j, failed: false } : j);
     saveJSON(JOBS_FILE, jobs);
   },
   saveConfig(patch) {

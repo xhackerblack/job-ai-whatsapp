@@ -14,12 +14,17 @@ let timer = null;
 async function sendPending() {
   const cfg = store.getConfig();
   if (!cfg.groupJid) { console.log('⚠️ لم تختر مجموعة واتساب بعد — اخترها من لوحة التحكم'); return; }
-  const pending = store.getJobs().filter(j => !j.sent).slice(0, cfg.maxJobsPerScan);
+  const pending = store.getJobs().filter(j => !j.sent && !j.failed).slice(0, cfg.maxJobsPerScan);
   for (const job of pending) {
     const ok = await wa.sendJob(job, cfg.groupJid);
     if (ok) {
       store.markSent([job.id]);
       console.log('📤 أُرسل:', job.title.slice(0, 50));
+    } else {
+      // فشل الإرسال (انقطاع اتصال مثلاً) — نؤجله للجولة القادمة بدل تكراره فوراً
+      store.markFailed([job.id]);
+      console.log('⚠️ تأجل الإرسال (سيُعاد لاحقاً):', job.title.slice(0, 40));
+      break; // إذا انقطع الاتصال لا فائدة من إكمال الباقي الآن
     }
   }
 }
@@ -60,7 +65,8 @@ function schedule() {
   startServer(PORT, { runScan, sendPending });
   schedule();
   await wa.startBot(() => {
-    // أول فحص بعد اتصال واتساب
+    // عند عودة الاتصال: أعد تفعيل العروض المؤجلة ثم افحص
+    store.resetFailed();
     setTimeout(() => runScan(false), 5000);
   });
 
