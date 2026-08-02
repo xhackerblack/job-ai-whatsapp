@@ -3,19 +3,41 @@
 // ============================================================
 const axios = require('axios');
 const cheerio = require('cheerio');
+const https = require('https');
+const path = require('path');
+const fs = require('fs');
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
   'Accept-Language': 'ar,fr;q=0.9'
 };
 
+// بعض المواقع المغربية شهاداتها غير مكتملة السلسلة — نتجاوز التحقق لها فقط
+const insecureAgent = new https.Agent({ rejectUnauthorized: false });
+
+// مجلد مؤقت متوافق مع Termux (مجلد /tmp العادي غير قابل للكتابة فيه)
+const TMP_DIR = process.env.TMPDIR || path.join(__dirname, '..', 'data');
+if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
+
+// جلب مع إعادة محاولة تلقائية (انقطاعات الشبكة في الهاتف شائعة)
+async function fetchWithRetry(url, opts = {}, retries = 2) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await axios.get(url, { headers: HEADERS, timeout: 30000, ...opts });
+    } catch (e) {
+      if (i === retries) throw e;
+      await new Promise(r => setTimeout(r, 3000));
+    }
+  }
+}
+
 // ---------------- Alwadifa-Maroc.com ----------------
 async function scrapeAlwadifa(pages = 2) {
   const out = [];
   for (let p = 1; p <= pages; p++) {
-    const url = p === 1 ? 'https://alwadifa-maroc.com/' : `https://alwadifa-maroc.com/page/${p}`;
+    const url = p === 1 ? 'https://alwadifa-maroc.com/' : `https://alwadifa-maroc.com/offre/index?page=${p}`;
     try {
-      const { data } = await axios.get(url, { headers: HEADERS, timeout: 30000 });
+      const { data } = await fetchWithRetry(url);
       const $ = cheerio.load(data);
       $('article.content-card[data-id]').each((_, el) => {
         const $el = $(el);
@@ -41,9 +63,9 @@ async function scrapeAlwadifa(pages = 2) {
 async function scrapeAnapec(headless = false) {
   const url = 'https://www.anapec.org/sigec-app-rv/fr/chercheurs/resultat_recherche/tout:all';
 
-  // المحاولة 1: HTTP مباشر (يشتغل إن كان السيرفر يرسل HTML جاهزاً)
+  // المحاولة 1: HTTP مباشر (مع تجاوز مشكلة شهادة SSL غير المكتملة)
   try {
-    const { data } = await axios.get(url, { headers: HEADERS, timeout: 30000 });
+    const { data } = await fetchWithRetry(url, { httpsAgent: insecureAgent });
     const parsed = parseAnapecHTML(data);
     if (parsed.length) return parsed;
   } catch (e) {
@@ -54,10 +76,10 @@ async function scrapeAnapec(headless = false) {
   if (headless) {
     try {
       const { execSync } = require('child_process');
-      const tmp = '/tmp/anapec_render.html';
+      const tmp = path.join(TMP_DIR, 'anapec_render.html');
       const chromeBin = process.env.CHROME_BIN || 'chromium-browser';
-      execSync(`${chromeBin} --headless --disable-gpu --no-sandbox --virtual-time-budget=15000 --dump-dom "${url}" > ${tmp} 2>/dev/null`, { timeout: 90000, shell: '/bin/sh' });
-      const html = require('fs').readFileSync(tmp, 'utf8');
+      execSync(`${chromeBin} --headless --disable-gpu --no-sandbox --virtual-time-budget=20000 --dump-dom "${url}" > "${tmp}" 2>/dev/null`, { timeout: 120000, shell: process.env.PREFIX ? process.env.PREFIX + '/bin/sh' : '/bin/sh' });
+      const html = fs.readFileSync(tmp, 'utf8');
       const parsed = parseAnapecHTML(html);
       console.log('[ANAPEC] headless:', parsed.length, 'عرض');
       return parsed;
